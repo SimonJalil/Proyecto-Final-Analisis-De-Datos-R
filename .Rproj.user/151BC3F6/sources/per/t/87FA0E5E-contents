@@ -1,0 +1,176 @@
+# --- Librerías necesarias ---
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# --- Cargar el dataset ---
+netflix <- read.csv("netflix_titles.csv", stringsAsFactors = FALSE)
+
+### 1. ANÁLISIS EXPLORATORIO ###
+
+# 1.1 Tabla: Cantidad de Películas vs Series
+tibble_1_1 <- netflix %>%
+  count(type)
+print(tibble_1_1)
+
+# 1.1 Gráfico
+ggplot(tibble_1_1, aes(x = type, y = n, fill = type)) +
+  geom_col() +
+  labs(title = "Cantidad de Películas vs Series en Netflix",
+       x = "Tipo de contenido", y = "Cantidad") +
+  theme_minimal()
+
+
+# 1.2 Tabla: Evolución de títulos por año
+tibble_1_2 <- netflix %>%
+  mutate(date_added = mdy(date_added),
+         year_added = year(date_added)) %>%
+  count(year_added, type) %>%
+  filter(!is.na(year_added))
+print(tibble_1_2)
+
+# 1.2 Gráfico
+ggplot(tibble_1_2, aes(x = year_added, y = n, fill = type)) +
+  geom_col(position = "dodge") +
+  labs(title = "Evolución de títulos añadidos por año",
+       x = "Año", y = "Cantidad de títulos") +
+  theme_minimal()
+
+
+# 1.3 Tabla: Clasificación más común
+tibble_1_3 <- netflix %>%
+  count(rating, sort = TRUE) %>%
+  slice_max(n, n = 10)
+print(tibble_1_3)
+
+# 1.3 Gráfico
+ggplot(tibble_1_3, aes(x = reorder(rating, n), y = n, fill = rating)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Clasificación de Contenido más Común en Netflix",
+       x = "Clasificación", y = "Cantidad de títulos") +
+  theme_minimal()
+
+### 2. ANÁLISIS GEOGRÁFICO ###
+
+# 2.1 Tabla: Top países (sin vacíos)
+tibble_2_1 <- netflix %>%
+  filter(!is.na(country)) %>%
+  separate_rows(country, sep = ", ") %>%
+  filter(country != "") %>%
+  count(country, sort = TRUE) %>%
+  slice_max(n, n = 10)
+print(tibble_2_1)
+
+# 2.1 Gráfico
+ggplot(tibble_2_1, aes(x = reorder(country, n), y = n, fill = country)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Top 10 países con más títulos en Netflix",
+       x = "País", y = "Cantidad de títulos") +
+  theme_minimal()
+
+# 2.2 Mapa: títulos por país (con nombre corregido)
+netflix_countries <- netflix %>%
+  filter(!is.na(country)) %>%
+  separate_rows(country, sep = ", ") %>%
+  filter(country != "") %>%
+  count(country) %>%
+  rename(name = country)
+
+# Corrección de nombres para hacer match con shapefile
+netflix_countries <- netflix_countries %>%
+  mutate(name = case_when(
+    name == "United States" ~ "United States of America",
+    name == "Russia" ~ "Russian Federation",
+    name == "South Korea" ~ "Republic of Korea",
+    name == "North Korea" ~ "Democratic People's Republic of Korea",
+    name == "Iran" ~ "Iran (Islamic Republic of)",
+    name == "Vietnam" ~ "Viet Nam",
+    name == "Bolivia" ~ "Bolivia (Plurinational State of)",
+    name == "Venezuela" ~ "Venezuela (Bolivarian Republic of)",
+    name == "Tanzania" ~ "United Republic of Tanzania",
+    TRUE ~ name
+  ))
+
+# Cargar mapa base
+world <- ne_countries(scale = "medium", returnclass = "sf")
+world_netflix <- left_join(world, netflix_countries, by = "name")
+
+# 2.2 Mapa
+ggplot(world_netflix) +
+  geom_sf(aes(fill = n)) +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey90") +
+  labs(title = "Cantidad de títulos por país en Netflix",
+       fill = "Títulos") +
+  theme_minimal()
+
+### 3. GÉNEROS Y DURACIÓN ###
+
+# 3.1 Tabla: Géneros más frecuentes
+tibble_3_1 <- netflix %>%
+  filter(!is.na(listed_in)) %>%
+  separate_rows(listed_in, sep = ", ") %>%
+  count(listed_in, sort = TRUE) %>%
+  slice_max(n, n = 10)
+print(tibble_3_1)
+
+# 3.1 Gráfico
+ggplot(tibble_3_1, aes(x = reorder(listed_in, n), y = n, fill = listed_in)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Top 10 géneros más frecuentes en Netflix",
+       x = "Género", y = "Cantidad de títulos") +
+  theme_minimal()
+
+# 3.2 Tabla: Duración promedio de películas
+tibble_3_2 <- netflix %>%
+  filter(type == "Movie", !is.na(duration)) %>%
+  mutate(minutos = as.numeric(gsub(" min", "", duration))) %>%
+  summarise(promedio_minutos = mean(minutos, na.rm = TRUE))
+print(tibble_3_2)
+
+# 3.3 Tabla: Promedio de temporadas en series
+tibble_3_3 <- netflix %>%
+  filter(type == "TV Show", !is.na(duration)) %>%
+  mutate(temporadas = as.numeric(gsub(" Season[s]?", "", duration))) %>%
+  summarise(promedio_temporadas = mean(temporadas, na.rm = TRUE))
+print(tibble_3_3)
+
+### 4. DIRECTORES Y ACTORES FRECUENTES ###
+
+# 4.1 Tabla: Top 10 directores válidos
+tibble_4_1 <- netflix %>%
+  filter(!is.na(director), director != "") %>%
+  count(director, sort = TRUE) %>%
+  slice_max(n, n = 10)
+print(tibble_4_1)
+
+# 4.1 Gráfico
+ggplot(tibble_4_1, aes(x = reorder(director, n), y = n, fill = director)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Top 10 directores con más títulos en Netflix",
+       x = "Director", y = "Cantidad de títulos") +
+  theme_minimal()
+
+# 4.2 Tabla: Top 10 actores válidos
+tibble_4_2 <- netflix %>%
+  filter(!is.na(cast), cast != "") %>%
+  separate_rows(cast, sep = ", ") %>%
+  count(cast, sort = TRUE) %>%
+  slice_max(n, n = 10)
+print(tibble_4_2)
+
+# 4.2 Gráfico
+ggplot(tibble_4_2, aes(x = reorder(cast, n), y = n, fill = cast)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Top 10 actores más recurrentes en Netflix",
+       x = "Actor / Actriz", y = "Cantidad de apariciones") +
+  theme_minimal()
+
